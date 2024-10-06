@@ -1,0 +1,202 @@
+---
+title: "Regresssão Não Linear - Modelo de Potência"
+subtitle: "Modelizando Crescimento de Peixe"
+abstract: Falar de reg não linear, de modelo de potencia e de crescimento e peixe.
+title-block-banner: true
+author: Evaldo Silva
+date: "`r format(Sys.time(), '%m, %d, %Y')`"
+format: 
+  html:
+    toc: true
+    toc-location: left
+    code-fold: false
+    number-sections: true
+    theme: paper           # cerulean, cosmo, flatly, journal, lumen, paper
+    highlight-style: github # espresso, github, tango, pygments, zenburn
+    mainfont: Times New Roman # cursive, serif, Times New Roman
+editor: visual
+lang: pt-BR
+editor_options: 
+  chunk_output_type: console
+bibliography: references.bib
+csl: food-chemistry.csl
+---
+
+```{r}
+#| label: setup
+#| echo: false
+#| warning: false
+#| message: false
+
+# Seguem abaixo ajustes globais para os chunks
+# & Carregamento das principais bibliotecas
+
+# 1) -----  Ajustes globais para os chunks---------------
+knitr::opts_chunk$set(echo = FALSE, 
+											warning = FALSE, 
+											message = FALSE, 
+											out.width = "70%",
+											fig.align = "center",
+                      dev = "png", 
+											comment = "  ",
+											fig.pos = "!ht", # Previne fig flutuar
+											fig.path = "plots/") # Local salvar os plots
+
+# 2) -----  Carregamento de bibliotecas (ou pacotes) ------
+
+
+# -----Carregamento de bibliotecas (ou pacotes) ---------
+#   Os pacotes contêm as funções que você para realizar testes
+#   estatístivos. Execute sempre este chunk para poder dispor das funções.
+library(knitr)
+library(rmarkdown)
+library(readr)
+library(kableExtra)
+library(ggplot2)
+library(dplyr)
+library(gt)
+
+# 3) -----  Carregamento de funções em script.R -------
+source("./functions/funcoes_proprias.R")
+```
+
+## Introdução
+
+Este estudo sobe regressão não linear abordará um modelo para dados cujo cmportamento é curvílieno. Trata-se do estudo crescimento de peixes em função das variáveis e peso da espécie. A espécie escohida neste estudo foi a perca européia (Perca Fluviatilis) @fig-perca, espécie não nativa originária da Europa Central. A introdução na Península Ibérica ocorreu na década de 90 .
+
+```{r}
+#| echo: false
+#| label: fig-perca
+#| fig-cap: "Exemplar da perca europeia (Perca subtilis)"
+
+knitr::include_graphics("images/perca.png")
+```
+
+## Carregamento dos dados
+
+Vamos começar lendo os dados do arquivo CSV para entender sua estrutura.
+
+```{r}
+dados <- read_csv("dados/Fish.csv") |> 
+  filter(especie == "Perch") |> 
+  mutate(x = comp3, y = peso)
+
+paged_table(dados)
+```
+
+## Visualização da dispersão dos dados
+
+Vamos primeiro fazer uma inspeção visual dos dados com um gráfico de dispersão, conforme @fig-dispersao.
+
+```{r}
+#| label: fig-dispersao
+#| fig-cap: "Grafico de dispersão dos dados experimentais"
+# visualize a dispersão dos pontos:
+ggplot(dados, aes(x = x, y= y)) + 
+  geom_point()
+```
+
+Os pontos descrevem uma curva, que parece indicar um crescimento e um modelo de potência (@eq-potencia) da forma abaixo poderia se ajustar aos dados:
+
+$$
+Peso = a*CT^b
+$$ {#eq-potencia}
+
+## Realização da análise de Regressão
+
+Agora vamos ajustar o modelo de regressão nao linear. Precisamos ter uma ideia dos valores inicias para as coeficientes a e b, antes de fazer a regressão aplicando a função `nls()`.
+
+```{r}
+# Carregar pacote necessário para calcular R² de modelos nls
+library(broom)
+
+# Estimação dos valores iniciais através de uma regressão linear dos logaritmos
+modelo_linear <- lm(log(y) ~ log(x), data = dados)
+inicial_a <- exp(coef(modelo_linear)[1])  # Converter de volta para a escala original
+inicial_b <- coef(modelo_linear)[2]
+
+# Ajuste do modelo de potência com nls
+modelo_potencia <- nls(y ~ a * x^b, data = dados, start = list(a = inicial_a, b = inicial_b))
+
+# Extraia os coeficientes diretamente
+a <- coef(modelo_potencia)["a"]
+b <- coef(modelo_potencia)["b"]
+
+# Obtenha o coeficiente de determinação (R²) de forma mais direta
+r2 <- summary(modelo_potencia)$r.squared  # Essa linha não funcionará como esperado para nls, corrigido abaixo
+
+# Correção para cálculo de R², pois summary(modelo_potencia)$r.squared não está disponível para 'nls'
+# Uma alternativa é usar o pacote 'broom' para extrair métricas do modelo
+modelo_glm <- glm(y ~ I(a * x^b), data = dados, start = c(a = a, b = b))
+r2_corrigido <- glance(modelo_glm)$r.squared
+
+# Resultados
+cat("Coeficientes: a =", a, "b =", b, "\nR² =", r2_corrigido, "\n")
+```
+
+```{r}
+#| echo: true
+# Encontre valores iniciais razoáveis
+inicial_a <- coef(lm(log(y) ~ x, data=dados))[1]
+inicial_b <- coef(lm(log(y) ~ x, data=dados))[2]
+
+# Realize a regressão não linear com o modelo de potência usando a função `nls`:
+modelo_potencia <- nls(y ~ a * x^b, data = dados, start = list(a = exp(inicial_a), b = inicial_b))
+
+# Extraia os coeficientes e o valor de R²:
+coeficientes <- coef(modelo_potencia)
+a <- coeficientes["a"]
+b <- coeficientes["b"]
+
+# Obtenha o coeficiente de determinação
+r2 <- 1 - sum(resid(modelo_potencia)^2) / sum((dados$y - mean(dados$y))^2)
+
+```
+
+## Avalaiação do Ajuste do modelo
+
+```{r}
+summary(modelo_potencia)
+
+# Armazenar os resíduos
+residuos <- residuals(modelo_potencia)
+
+# Criar o gráfico Q-Q dos resíduos
+qqnorm(residuos)
+qqline(residuos)
+
+# Criar o gráfico de dispersão dos resíduos em relação aos valores ajustados
+plot(fitted(modelo_potencia), residuos)
+abline(h = 0, lty = 2)
+```
+
+```{r}
+# Teste de Shapiro-Wilk para normalidade dos resíduos
+shapiro.test(residuals(modelo_potencia))
+
+```
+
+A falta de ajuste para ser uma má qualidade na obtenção dos dados, ou indivíduos maiores apresentam uma variabilidade intrínsica diversa, que poder causada por peixes adultos em bom diferentes estados nutricionais, ou uma questão ontogenética desses indivíduos da amostra.
+
+## Criação do gráfico
+
+```{r}
+# Crie um gráfico com os pontos originais e a curva ajustada usando o `ggplot2` e inclua a equação e o R² no gráfico:
+ggplot(dados, aes(x = x, y = y)) +
+  geom_point() +
+  geom_smooth(method = "nls", formula = y ~ a * x^b, 
+              method.args = list(start = list(a = exp(inicial_a), b = inicial_b)), 
+              se = FALSE, color = "red", linetype = "solid") +
+  labs(title = "Regressão Não Linear - Modelo de Potência",
+       x = "Variável Independente (x)",
+       y = "Variável Dependente (y)") +
+  annotate("text", x = min(dados$x), y = max(dados$y), hjust = 0, vjust = 1,
+           label = sprintf("Equação: y = %.2f * x^%.2f\nR² = %.2f", a, b, r2),
+           size = 4, color = "black")
+```
+
+### Discussão dos Resultados
+
+Os dados mostram que a regressão como modelo de potência se ajustou bem aos dados experimentais
+
+## Conclusão
